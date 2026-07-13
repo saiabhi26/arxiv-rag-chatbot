@@ -1,4 +1,4 @@
-wikipedia-api
+pymupdf
 sentence-transformers
 transformers
 torch

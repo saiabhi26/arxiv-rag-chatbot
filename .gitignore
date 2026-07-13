@@ -1,2 +1,5 @@
 .DS_Store
 __pycache__/
+
+# Cached source PDFs — re-downloadable from arXiv, ~hundreds of MB.
+data/pdfs/

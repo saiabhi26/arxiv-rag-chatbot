@@ -1,3 +1,5 @@
+# THIS PROJECT IS NOW BEING REBUILT INTO SOMETHING BETTER: SEE BRANCH REBUILD/ARXIV-RAG-PART1
+
 # Wiki Chatbot
 
 A Streamlit app that answers user questions with a Wikipedia-backed retrieval and answer-generation pipeline.

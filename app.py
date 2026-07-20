@@ -8,28 +8,50 @@ os.environ['MKL_NUM_THREADS'] = '1'
 import streamlit as st
 from classifier import load_classifier, classify
 from retriever import load_retriever, retrieve
-from generator import load_generator, generate_answer, chit_chat_response
+from generator import ClaudeGenerator, chit_chat_response
 
-st.set_page_config(page_title="Wiki Chatbot", page_icon="🤖", layout="centered")
-st.title("🤖 Wikipedia Chatbot")
+st.set_page_config(page_title="arXiv ML Chatbot", page_icon="🤖", layout="centered")
+st.title("🤖 arXiv ML Chatbot")
 
-DISTANCE_THRESHOLD = 0.85
+# Cosine-similarity gate (higher = more relevant). PROVISIONAL — the honest,
+# calibrated value comes from the eval harness in step 11. Do not present this
+# number in the README as though it were principled.
+SIMILARITY_THRESHOLD = 0.35
 
-# Load all models once and cache them
+# The API key lives in Streamlit Cloud secrets on deploy, or a gitignored
+# .streamlit/secrets.toml (or an ANTHROPIC_API_KEY env var) locally. Never committed.
+def get_api_key():
+    try:
+        if "ANTHROPIC_API_KEY" in st.secrets:
+            return st.secrets["ANTHROPIC_API_KEY"]
+    except Exception:
+        pass  # no secrets.toml present at all
+    return os.environ.get("ANTHROPIC_API_KEY")
+
+# Load embedding/retrieval models and the Claude client once, and cache them.
 @st.cache_resource
-def load_all_models():
+def load_all_models(api_key):
     clf, embed_model = load_classifier()
-    retrieval_model, index, texts = load_retriever()
-    generator = load_generator()
-    return clf, embed_model, retrieval_model, index, texts, generator
+    retrieval_model, index, chunks = load_retriever()
+    generator = ClaudeGenerator(api_key)
+    return clf, embed_model, retrieval_model, index, chunks, generator
 
 # Check index exists before loading
 if not os.path.exists("data/faiss_index.bin"):
     st.error("⚠️ FAISS index not found. Run `python retriever.py` first to build it.")
     st.stop()
 
+api_key = get_api_key()
+if not api_key:
+    st.error(
+        "⚠️ No Anthropic API key found. Add `ANTHROPIC_API_KEY` to "
+        "`.streamlit/secrets.toml` (or the Streamlit Cloud secrets dashboard). "
+        "Get a key at https://console.anthropic.com/settings/keys."
+    )
+    st.stop()
+
 with st.spinner("Loading models..."):
-    clf, embed_model, retrieval_model, index, texts, generator = load_all_models()
+    clf, embed_model, retrieval_model, index, chunks, generator = load_all_models(api_key)
 
 # Chat history
 if "messages" not in st.session_state:
@@ -51,18 +73,18 @@ if prompt := st.chat_input("Ask me anything..."):
             if intent == "chit-chat":
                 response = chit_chat_response(prompt)
             else:
-                docs, distances = retrieve(prompt, retrieval_model, index, texts, top_k=5)
-                if min(distances) > DISTANCE_THRESHOLD:
+                docs, scores = retrieve(prompt, retrieval_model, index, chunks, top_k=5)
+                if max(scores) < SIMILARITY_THRESHOLD:
                     response = "I don't have enough information on that in my knowledge base. Try rephrasing, or ask about a different topic."
                 else:
-                    response = generate_answer(prompt, docs, generator)
+                    response = generator.generate(prompt, [d["text"] for d in docs])
 
         st.markdown(response)
 
         # Show retrieved docs in expander for knowledge queries
-        if intent == "knowledge" and min(distances) <= DISTANCE_THRESHOLD:
+        if intent == "knowledge" and max(scores) >= SIMILARITY_THRESHOLD:
             with st.expander("📄 Source documents used"):
                 for i, doc in enumerate(docs, 1):
-                    st.markdown(f"**{i}.** {doc[:300]}...")
+                    st.markdown(f"**{i}. {doc['title']} — {doc['section']}**\n\n{doc['text'][:300]}...")
 
     st.session_state.messages.append({"role": "assistant", "content": response})

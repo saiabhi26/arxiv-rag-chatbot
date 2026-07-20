@@ -3,3 +3,8 @@ __pycache__/
 
 # Cached source PDFs — re-downloadable from arXiv, ~hundreds of MB.
 data/pdfs/
+
+# Local API keys — the deployed key lives in the Streamlit Cloud secrets dashboard.
+.streamlit/secrets.toml
+docs/
+CLAUDE.md

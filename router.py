@@ -39,9 +39,9 @@ class Router:
                 messages=[{"role": "user", "content": query}],
             )
             label = response.content[0].text.lower().strip()
-        except anthropic.APIError:
-            # Rate limit, 5xx, or any other API failure: fall back to the
-            # safer default rather than let routing crash the app.
+        except (anthropic.APIError, IndexError, AttributeError):
+            # Rate limit, 5xx, empty/malformed response, or any other failure:
+            # fall back to the safer default rather than let routing crash the app.
             return "knowledge"
 
         if "chit" in label:

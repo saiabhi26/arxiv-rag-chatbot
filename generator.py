@@ -43,6 +43,11 @@ _BUSY_MESSAGE = (
     "The model is experiencing high demand right now. "
     "Please wait a few seconds and try again."
 )
+# Catch-all for non-rate, non-capacity failures (bad key, exhausted credits,
+# bad request, network errors) — never surface raw provider error text to users.
+_ERROR_MESSAGE = (
+    "Something went wrong reaching the model. Please try again in a moment."
+)
 
 
 class Generator(Protocol):
@@ -56,6 +61,30 @@ class ClaudeGenerator:
         self._client = anthropic.Anthropic(api_key=api_key)
         self._model = model
 
+    def _complete(self, system_instruction: str, user_content: str) -> str:
+        """Call the Claude API and turn every failure mode into a plain
+        string — no exception from this method ever reaches the caller."""
+        try:
+            response = self._client.messages.create(
+                model=self._model,
+                max_tokens=MAX_TOKENS,
+                system=system_instruction,
+                messages=[{"role": "user", "content": user_content}],
+            )
+            if not response.content:
+                return _ERROR_MESSAGE
+            return response.content[0].text
+        except anthropic.RateLimitError:
+            return _RATE_LIMIT_MESSAGE
+        except anthropic.APIStatusError as e:
+            # 5xx = provider capacity spike (retryable); other statuses (4xx:
+            # bad key, exhausted credits, bad request) are not, but must still
+            # degrade to a message, never a stack trace.
+            return _BUSY_MESSAGE if getattr(e, "status_code", 500) >= 500 else _ERROR_MESSAGE
+        except anthropic.APIError:
+            # Base class also covers APIConnectionError (network) — never raise.
+            return _ERROR_MESSAGE
+
     def generate(self, query: str, contexts: list[str]) -> str:
         # All retrieved chunks fit comfortably in Claude's context window —
         # nothing is silently dropped (unlike the old flan-t5 path, which
@@ -66,34 +95,7 @@ class ClaudeGenerator:
             f"Question: {query}\n\n"
             f"Answer:"
         )
-        try:
-            response = self._client.messages.create(
-                model=self._model,
-                max_tokens=MAX_TOKENS,
-                system=_SYSTEM_INSTRUCTION,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            return response.content[0].text
-        except anthropic.RateLimitError:
-            return _RATE_LIMIT_MESSAGE
-        except (anthropic.InternalServerError, anthropic.APIStatusError) as e:
-            # 529 overloaded / any 5xx: degrade politely rather than throw.
-            if getattr(e, "status_code", 500) >= 500:
-                return _BUSY_MESSAGE
-            raise
+        return self._complete(_SYSTEM_INSTRUCTION, prompt)
 
     def chit_chat(self, query: str) -> str:
-        try:
-            response = self._client.messages.create(
-                model=self._model,
-                max_tokens=MAX_TOKENS,
-                system=_CHIT_CHAT_SYSTEM_INSTRUCTION,
-                messages=[{"role": "user", "content": query}],
-            )
-            return response.content[0].text
-        except anthropic.RateLimitError:
-            return _RATE_LIMIT_MESSAGE
-        except (anthropic.InternalServerError, anthropic.APIStatusError) as e:
-            if getattr(e, "status_code", 500) >= 500:
-                return _BUSY_MESSAGE
-            raise
+        return self._complete(_CHIT_CHAT_SYSTEM_INSTRUCTION, query)

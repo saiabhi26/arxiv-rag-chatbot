@@ -43,7 +43,10 @@ def load_all_models(api_key):
 
 # Process-wide global counter, shared across all sessions/reruns via
 # @st.cache_resource, so the daily cap applies to the whole demo, not one
-# browser session.
+# browser session. Because it lives in @st.cache_resource (in-memory, not
+# persisted), it bounds requests per process-lifetime, not a strict calendar
+# day — it resets whenever the Streamlit Cloud app restarts or wakes from
+# idle-sleep.
 @st.cache_resource
 def get_global_counter():
     return {"date": date.today().isoformat(), "count": 0}

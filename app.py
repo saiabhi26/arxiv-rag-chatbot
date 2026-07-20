@@ -9,6 +9,7 @@ import streamlit as st
 from retriever import load_retriever, retrieve
 from generator import ClaudeGenerator
 from router import Router
+from corpus import compute_overview_context
 
 st.set_page_config(page_title="arXiv ML Chatbot", page_icon="🤖", layout="centered")
 st.title("🤖 arXiv ML Chatbot")
@@ -32,9 +33,10 @@ def get_api_key():
 @st.cache_resource
 def load_all_models(api_key):
     retrieval_model, index, chunks = load_retriever()
+    overview_context = compute_overview_context(chunks)
     router = Router(api_key)
     generator = ClaudeGenerator(api_key)
-    return retrieval_model, index, chunks, router, generator
+    return retrieval_model, index, chunks, overview_context, router, generator
 
 # Check index exists before loading
 if not os.path.exists("data/faiss_index.bin"):
@@ -51,7 +53,7 @@ if not api_key:
     st.stop()
 
 with st.spinner("Loading models..."):
-    retrieval_model, index, chunks, router, generator = load_all_models(api_key)
+    retrieval_model, index, chunks, overview_context, router, generator = load_all_models(api_key)
 
 # Chat history
 if "messages" not in st.session_state:
@@ -72,6 +74,8 @@ if prompt := st.chat_input("Ask me anything..."):
 
             if intent == "chit-chat":
                 response = generator.chit_chat(prompt)
+            elif intent == "overview":
+                response = generator.generate(prompt, [overview_context])
             else:
                 docs, scores = retrieve(prompt, retrieval_model, index, chunks, top_k=5)
                 if max(scores) < SIMILARITY_THRESHOLD:

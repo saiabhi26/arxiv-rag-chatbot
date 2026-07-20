@@ -83,6 +83,8 @@ if prompt := st.chat_input("Ask me anything..."):
     allowed, limit_msg = check_rate_limit(
         st.session_state.request_count, get_global_counter(), date.today().isoformat())
 
+    history = list(st.session_state.messages)
+
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
@@ -96,18 +98,22 @@ if prompt := st.chat_input("Ask me anything..."):
 
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                intent = router.classify(prompt)
+                standalone = router.contextualize(history, prompt)
+                intent = router.classify(standalone)
 
                 if intent == "chit-chat":
                     response = generator.chit_chat(prompt)
                 elif intent == "overview":
                     response = generator.generate(prompt, [overview_context])
                 else:
-                    docs, scores = retrieve(prompt, retrieval_model, index, chunks, top_k=5)
+                    docs, scores = retrieve(standalone, retrieval_model, index, chunks, top_k=5)
                     if max(scores) < SIMILARITY_THRESHOLD:
                         response = "I don't have enough information on that in my knowledge base. Try rephrasing, or ask about a different topic."
                     else:
-                        response = generator.generate(prompt, [d["text"] for d in docs])
+                        labeled_contexts = [
+                            f"{d['title']} — {d['section']}\n{d['text']}" for d in docs
+                        ]
+                        response = generator.generate(standalone, labeled_contexts)
 
             st.markdown(response)
 

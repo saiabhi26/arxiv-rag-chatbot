@@ -5,64 +5,116 @@ os.environ['OMP_NUM_THREADS'] = '1'
 os.environ['NUMEXPR_MAX_THREADS'] = '4'
 os.environ['MKL_NUM_THREADS'] = '1'
 
+from datetime import date
+
 import streamlit as st
-from classifier import load_classifier, classify
 from retriever import load_retriever, retrieve
-from generator import load_generator, generate_answer, chit_chat_response
+from generator import ClaudeGenerator
+from router import Router
+from corpus import compute_overview_context
+from ratelimit import check_rate_limit
 
-st.set_page_config(page_title="Wiki Chatbot", page_icon="🤖", layout="centered")
-st.title("🤖 Wikipedia Chatbot")
+st.set_page_config(page_title="arXiv ML Chatbot", page_icon="🤖", layout="centered")
+st.title("🤖 arXiv ML Chatbot")
 
-DISTANCE_THRESHOLD = 0.85
+# Cosine-similarity gate (higher = more relevant). PROVISIONAL — the honest,
+# calibrated value comes from the eval harness in step 11. Do not present this
+# number in the README as though it were principled.
+SIMILARITY_THRESHOLD = 0.35
 
-# Load all models once and cache them
+# The API key lives in Streamlit Cloud secrets on deploy, or a gitignored
+# .streamlit/secrets.toml (or an ANTHROPIC_API_KEY env var) locally. Never committed.
+def get_api_key():
+    try:
+        if "ANTHROPIC_API_KEY" in st.secrets:
+            return st.secrets["ANTHROPIC_API_KEY"]
+    except Exception:
+        pass  # no secrets.toml present at all
+    return os.environ.get("ANTHROPIC_API_KEY")
+
+# Load embedding/retrieval models and the Claude client once, and cache them.
 @st.cache_resource
-def load_all_models():
-    clf, embed_model = load_classifier()
-    retrieval_model, index, texts = load_retriever()
-    generator = load_generator()
-    return clf, embed_model, retrieval_model, index, texts, generator
+def load_all_models(api_key):
+    retrieval_model, index, chunks = load_retriever()
+    overview_context = compute_overview_context(chunks)
+    router = Router(api_key)
+    generator = ClaudeGenerator(api_key)
+    return retrieval_model, index, chunks, overview_context, router, generator
+
+# Process-wide global counter, shared across all sessions/reruns via
+# @st.cache_resource, so the daily cap applies to the whole demo, not one
+# browser session. Because it lives in @st.cache_resource (in-memory, not
+# persisted), it bounds requests per process-lifetime, not a strict calendar
+# day — it resets whenever the Streamlit Cloud app restarts or wakes from
+# idle-sleep.
+@st.cache_resource
+def get_global_counter():
+    return {"date": date.today().isoformat(), "count": 0}
 
 # Check index exists before loading
 if not os.path.exists("data/faiss_index.bin"):
     st.error("⚠️ FAISS index not found. Run `python retriever.py` first to build it.")
     st.stop()
 
+api_key = get_api_key()
+if not api_key:
+    st.error(
+        "⚠️ No Anthropic API key found. Add `ANTHROPIC_API_KEY` to "
+        "`.streamlit/secrets.toml` (or the Streamlit Cloud secrets dashboard). "
+        "Get a key at https://console.anthropic.com/settings/keys."
+    )
+    st.stop()
+
 with st.spinner("Loading models..."):
-    clf, embed_model, retrieval_model, index, texts, generator = load_all_models()
+    retrieval_model, index, chunks, overview_context, router, generator = load_all_models(api_key)
 
 # Chat history
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
+if "request_count" not in st.session_state:
+    st.session_state.request_count = 0
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
 if prompt := st.chat_input("Ask me anything..."):
+    allowed, limit_msg = check_rate_limit(
+        st.session_state.request_count, get_global_counter(), date.today().isoformat())
+
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-            intent = classify(prompt, clf, embed_model)
+    if not allowed:
+        with st.chat_message("assistant"):
+            st.markdown(limit_msg)
+        st.session_state.messages.append({"role": "assistant", "content": limit_msg})
+    else:
+        st.session_state.request_count += 1
 
-            if intent == "chit-chat":
-                response = chit_chat_response(prompt)
-            else:
-                docs, distances = retrieve(prompt, retrieval_model, index, texts, top_k=5)
-                if min(distances) > DISTANCE_THRESHOLD:
-                    response = "I don't have enough information on that in my knowledge base. Try rephrasing, or ask about a different topic."
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                intent = router.classify(prompt)
+
+                if intent == "chit-chat":
+                    response = generator.chit_chat(prompt)
+                elif intent == "overview":
+                    response = generator.generate(prompt, [overview_context])
                 else:
-                    response = generate_answer(prompt, docs, generator)
+                    docs, scores = retrieve(prompt, retrieval_model, index, chunks, top_k=5)
+                    if max(scores) < SIMILARITY_THRESHOLD:
+                        response = "I don't have enough information on that in my knowledge base. Try rephrasing, or ask about a different topic."
+                    else:
+                        response = generator.generate(prompt, [d["text"] for d in docs])
 
-        st.markdown(response)
+            st.markdown(response)
 
-        # Show retrieved docs in expander for knowledge queries
-        if intent == "knowledge" and min(distances) <= DISTANCE_THRESHOLD:
-            with st.expander("📄 Source documents used"):
-                for i, doc in enumerate(docs, 1):
-                    st.markdown(f"**{i}.** {doc[:300]}...")
+            # Show retrieved docs in expander for knowledge queries
+            if intent == "knowledge" and max(scores) >= SIMILARITY_THRESHOLD:
+                with st.expander("📄 Source documents used"):
+                    for i, doc in enumerate(docs, 1):
+                        st.markdown(f"**{i}. {doc['title']} — {doc['section']}**\n\n{doc['text'][:300]}...")
 
-    st.session_state.messages.append({"role": "assistant", "content": response})
+        st.session_state.messages.append({"role": "assistant", "content": response})

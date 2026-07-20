@@ -1,9 +1,8 @@
-wikipedia-api
+pymupdf
 sentence-transformers
-transformers
 torch
 faiss-cpu
+anthropic
 streamlit
-scikit-learn
 numpy
 pandas

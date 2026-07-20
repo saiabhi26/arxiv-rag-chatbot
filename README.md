@@ -15,7 +15,7 @@ deliberate, tunable component rather than an afterthought.
 
 ## Live demo
 
-**[→ live demo](REPLACE_WITH_STREAMLIT_URL)**
+**[→ live demo](https://arxiv-rag-chatbot.streamlit.app/)**
 
 > ⏳ Hosted on a free tier that sleeps when idle — the first load after a quiet period may take ~30s
 > to wake and load the embedding model + index. Subsequent questions are fast.

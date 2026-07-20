@@ -6,9 +6,9 @@ os.environ['NUMEXPR_MAX_THREADS'] = '4'
 os.environ['MKL_NUM_THREADS'] = '1'
 
 import streamlit as st
-from classifier import load_classifier, classify
 from retriever import load_retriever, retrieve
-from generator import ClaudeGenerator, chit_chat_response
+from generator import ClaudeGenerator
+from router import Router
 
 st.set_page_config(page_title="arXiv ML Chatbot", page_icon="🤖", layout="centered")
 st.title("🤖 arXiv ML Chatbot")
@@ -31,10 +31,10 @@ def get_api_key():
 # Load embedding/retrieval models and the Claude client once, and cache them.
 @st.cache_resource
 def load_all_models(api_key):
-    clf, embed_model = load_classifier()
     retrieval_model, index, chunks = load_retriever()
+    router = Router(api_key)
     generator = ClaudeGenerator(api_key)
-    return clf, embed_model, retrieval_model, index, chunks, generator
+    return retrieval_model, index, chunks, router, generator
 
 # Check index exists before loading
 if not os.path.exists("data/faiss_index.bin"):
@@ -51,7 +51,7 @@ if not api_key:
     st.stop()
 
 with st.spinner("Loading models..."):
-    clf, embed_model, retrieval_model, index, chunks, generator = load_all_models(api_key)
+    retrieval_model, index, chunks, router, generator = load_all_models(api_key)
 
 # Chat history
 if "messages" not in st.session_state:
@@ -68,10 +68,10 @@ if prompt := st.chat_input("Ask me anything..."):
 
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            intent = classify(prompt, clf, embed_model)
+            intent = router.classify(prompt)
 
             if intent == "chit-chat":
-                response = chit_chat_response(prompt)
+                response = generator.chit_chat(prompt)
             else:
                 docs, scores = retrieve(prompt, retrieval_model, index, chunks, top_k=5)
                 if max(scores) < SIMILARITY_THRESHOLD:

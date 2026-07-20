@@ -4,6 +4,5 @@ torch
 faiss-cpu
 anthropic
 streamlit
-scikit-learn
 numpy
 pandas

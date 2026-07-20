@@ -25,6 +25,14 @@ _SYSTEM_INSTRUCTION = (
     "guess. Be concise."
 )
 
+_CHIT_CHAT_SYSTEM_INSTRUCTION = (
+    "You are a friendly chatbot that answers questions about recent arXiv "
+    "machine-learning papers. The user just sent a conversational message "
+    "(a greeting, thanks, small talk, or a question about you) rather than a "
+    "research question. Reply warmly and briefly — one or two sentences — "
+    "and, where natural, remind them they can ask about recent ML research."
+)
+
 # Shown for transient API failures instead of a stack trace mid-demo (Trap #5).
 # 429 = rate limit; 5xx / overloaded = provider-side capacity spikes.
 _RATE_LIMIT_MESSAGE = (
@@ -74,24 +82,18 @@ class ClaudeGenerator:
                 return _BUSY_MESSAGE
             raise
 
-
-# --- Chit-chat (interim) -----------------------------------------------------
-# Still routed by the pickled classifier until step 5 replaces routing with the
-# LLM. Step 5 deletes this dict and lets the LLM answer chit-chat directly.
-CHIT_CHAT_RESPONSES = {
-    "hello": "Hey! Ask me anything about recent arXiv machine-learning papers.",
-    "hi": "Hi there! What would you like to know about recent ML research?",
-    "how are you": "I'm doing great! Ready to answer your questions.",
-    "bye": "Goodbye! Come back anytime.",
-    "thanks": "You're welcome!",
-    "who are you": "I'm a chatbot over recent arXiv ML papers. Ask me anything about them!",
-    "default": "I'm not sure how to respond to that. Try asking me about recent ML research!",
-}
-
-
-def chit_chat_response(query):
-    query_lower = query.lower().strip()
-    for key in CHIT_CHAT_RESPONSES:
-        if key in query_lower:
-            return CHIT_CHAT_RESPONSES[key]
-    return CHIT_CHAT_RESPONSES["default"]
+    def chit_chat(self, query: str) -> str:
+        try:
+            response = self._client.messages.create(
+                model=self._model,
+                max_tokens=MAX_TOKENS,
+                system=_CHIT_CHAT_SYSTEM_INSTRUCTION,
+                messages=[{"role": "user", "content": query}],
+            )
+            return response.content[0].text
+        except anthropic.RateLimitError:
+            return _RATE_LIMIT_MESSAGE
+        except (anthropic.InternalServerError, anthropic.APIStatusError) as e:
+            if getattr(e, "status_code", 500) >= 500:
+                return _BUSY_MESSAGE
+            raise

@@ -1,0 +1,5 @@
+# Offline corpus-build dependencies (scraper.py + pdf_parser.py). The deployed
+# app never runs these, so they are kept out of requirements.txt to keep the
+# Streamlit Cloud build lean.
+-r requirements.txt
+pymupdf

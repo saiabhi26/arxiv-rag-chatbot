@@ -1,0 +1,11 @@
+# Deployed app config. The file watcher is Streamlit's hot-reload mechanism;
+# a deployed app never edits source, and leaving it on makes Streamlit walk the
+# transformers package tree at import time — which logs noisy
+# `torchvision` ModuleNotFoundErrors (optional vision models we don't use) and
+# adds startup overhead. Disable it.
+[server]
+fileWatcherType = "none"
+headless = true
+
+[browser]
+gatherUsageStats = false

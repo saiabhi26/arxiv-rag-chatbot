@@ -1,8 +1,6 @@
-pymupdf
 sentence-transformers
 torch
 faiss-cpu
 anthropic
 streamlit
 numpy
-pandas

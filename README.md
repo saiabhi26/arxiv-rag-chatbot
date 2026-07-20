@@ -65,9 +65,10 @@ streamlit run app.py
 
 The index artifacts (`data/faiss_index.bin`, `data/chunks.json`) are committed, so the app runs
 without rebuilding anything. To rebuild the corpus and index from scratch (offline, on a laptop —
-the app never scrapes at serve time):
+the app never scrapes at serve time), install the extra scraper dependencies first:
 
 ```bash
+pip install -r requirements-dev.txt   # adds pymupdf for PDF parsing
 python scraper.py     # re-download + parse papers -> data/documents.json  (needs network; ~500MB of PDFs, gitignored)
 python retriever.py   # re-embed + build the index  -> data/faiss_index.bin + data/chunks.json
 ```

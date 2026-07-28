@@ -11,10 +11,8 @@ from sentence_transformers import SentenceTransformer
 CHUNK_SIZE_WORDS = 150
 CHUNK_OVERLAP_WORDS = 30
 
-# NOTE: this constant is duplicated in classifier.py and MUST stay identical
-# while the classifier lives — its pickled model was fit on this model's
-# embedding space. (classifier.py is deleted in step 5, taking the duplication
-# and Trap #3 with it.)
+# Embedding model. Must be identical between index build and query time — the
+# committed index holds vectors in THIS model's embedding space.
 EMBED_MODEL = "all-MiniLM-L6-v2"
 INDEX_PATH = "data/faiss_index.bin"
 DOCS_PATH = "data/documents.json"
@@ -76,9 +74,8 @@ def build_index():
     print("Encoding documents (this takes a while)...")
     model = SentenceTransformer(EMBED_MODEL)
     # normalize_embeddings=True so that inner product == cosine similarity.
-    # This must match the query-time encoding exactly (Trap #2), and must NOT
-    # leak into a shared helper the classifier uses (Trap #3) — it lives only
-    # in the retriever.
+    # The query side (retrieve()) must normalize identically, or the scores are
+    # meaningless.
     embeddings = model.encode(
         [embed_text(c) for c in chunks],
         show_progress_bar=True,
